@@ -2,7 +2,8 @@ import numpy as np
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import train_test_split
-
+from tqdm import tqdm
+import regex as re
 INPUT_VOCAB_SIZE: int
 OUTPUT_VOCAB_SIZE: int
 MAX_INPUT_LENGTH: int
@@ -17,9 +18,9 @@ reverse_word_index_output: dict
 input_tokenizer: Tokenizer
 output_tokenizer: Tokenizer
 
-
 # Load the data (assuming it's in a text file with German and English sentences line by line)
-def load_data(file_path):
+
+def load_data(file_path: str) -> tuple[list[str], list[str]]:
     input_texts = []
     target_texts = []
 
@@ -27,19 +28,38 @@ def load_data(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-        # Loop through the lines, assuming German and English sentences are in pairs
-        for i in range(0, len(lines) - 1, 2):  # Increment by 2 for each German-English pair
-            german = lines[i].strip()  # Get the German sentence
-            english = lines[i + 1].strip()  # Get the English sentence
+    german = False
+    english = False
+    print("Reading data...")
+    for line in tqdm(lines, desc="Processing lines"):
+        line = line.strip()
+        # wait for the <tu> tag
+        if line.startswith('<tu>'):
+            german = True
+        elif line.startswith('</tu>'):
+            german = False
+            english = False
+        elif german:
+            match = re.search(r'<seg>(.*)</seg>', line)
+            if match:
+                input_texts.append(match.group(1))
+            german = False
+            english = True
 
-            input_texts.append(german)
-            target_texts.append(english)
-
+        elif english:
+            match = re.search(r'<seg>(.*)</seg>', line)
+            if match:
+                target_texts.append(match.group(1))
+            english = False
+    print("Data read successfully")
+    print("Sample data:")
+    print(input_texts[:5])
+    print(target_texts[:5])
     return input_texts, target_texts
 
 
 def main(data_path: str) -> None:
-    # Im sorry the code is kinda shit with all the globals
+    # I'm sorry the code is kinda shit with all the globals
     global INPUT_VOCAB_SIZE, OUTPUT_VOCAB_SIZE, MAX_INPUT_LENGTH, MAX_OUTPUT_LENGTH
     global encoder_input_train, decoder_input_train, decoder_target_train
     global encoder_input_val, decoder_input_val, decoder_target_val
@@ -50,14 +70,16 @@ def main(data_path: str) -> None:
     input_texts, target_texts = load_data(data_path)
 
     # Add start and end tokens to target sentences for training (e.g., "<start>" and "<end>")
-    target_texts = ['<start> ' + text + ' <end>' for text in target_texts]
+    target_texts = ['sos ' + text + ' eos' for text in target_texts]
 
     # Tokenize the input (German) and output (English) sentences
+    print("Tokenizing Input")
     input_tokenizer = Tokenizer()
     input_tokenizer.fit_on_texts(input_texts)
     input_sequences = input_tokenizer.texts_to_sequences(input_texts)
     INPUT_VOCAB_SIZE = len(input_tokenizer.word_index) + 1
 
+    print("Tokenizing Output")
     output_tokenizer = Tokenizer()
     output_tokenizer.fit_on_texts(target_texts)
     output_sequences = output_tokenizer.texts_to_sequences(target_texts)
@@ -83,4 +105,8 @@ def main(data_path: str) -> None:
 
 
 if __name__ == '__main__':
-    main("tldr.tmx")
+    import tensorflow as tf
+
+    devices = tf.config.list_physical_devices()
+    print("\nDevices: ", devices)
+    print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
