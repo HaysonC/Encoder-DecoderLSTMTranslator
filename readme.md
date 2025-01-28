@@ -31,3 +31,10 @@ pip install -r requirements.txt
 ## Usage
 Replace the ```load_data.main(str)``` call with the path to the tmx file you downloaded from OPUS. The file is used to train and validate the model.
 Run the notebook `sample.ipynb` to train and evaluate the model.
+
+# Results
+We unfortunately have no access to enough GPU resource to train the model on the entire dataset. However, the model can be trained on a smaller dataset to get a feel of how it works. The model can be trained on a larger dataset to get better results.
+Currently, the last training had stagnated validation loss, demonstrating the need for more data or better hyperparameters/preprocessing.
+
+The plot below shows the training and validation loss over epochs.
+<img src=loss_val_loss.png>
