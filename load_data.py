@@ -4,6 +4,8 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import regex as re
+from InquirerPy import inquirer
+
 INPUT_VOCAB_SIZE: int
 OUTPUT_VOCAB_SIZE: int
 MAX_INPUT_LENGTH: int
@@ -18,22 +20,42 @@ reverse_word_index_output: dict
 input_tokenizer: Tokenizer
 output_tokenizer: Tokenizer
 
-# Load the data (assuming it's in a text file with German and English sentences line by line)
+# Load Europarl data
 
-def load_data(file_path: str) -> tuple[list[str], list[str]]:
+def load_europarl_data(file_path_en: str, file_path_de: str) -> tuple[list[str], list[str]]:
+    """
+    Loads Europarl data from two separate files: English and German.
+
+    :param file_path_en: Path to the English file (.en)
+    :param file_path_de: Path to the German file (.de)
+    :return: A tuple containing lists of English and German sentences
+    """
+    with open(file_path_en, 'r', encoding='utf-8') as f_en, open(file_path_de, 'r', encoding='utf-8') as f_de:
+        input_texts = [line.strip() for line in f_de.readlines()]
+        target_texts = [line.strip() for line in f_en.readlines()]
+
+    if len(input_texts) != len(target_texts):
+        raise ValueError("The number of lines in the English and German files do not match.")
+
+    print("Sample German Sentences:", input_texts[:5])
+    print("Sample English Sentences:", target_texts[:5])
+
+    return input_texts, target_texts
+
+# Load TMX data
+
+def load_tmx_data(file_path: str) -> tuple[list[str], list[str]]:
     input_texts = []
     target_texts = []
 
-    # Open the file and read line by line
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
     german = False
     english = False
-    print("Reading data...")
+    print("Reading TMX data...")
     for line in tqdm(lines, desc="Processing lines"):
         line = line.strip()
-        # wait for the <tu> tag
         if line.startswith('<tu>'):
             german = True
         elif line.startswith('</tu>'):
@@ -51,28 +73,53 @@ def load_data(file_path: str) -> tuple[list[str], list[str]]:
             if match:
                 target_texts.append(match.group(1))
             english = False
-    print("Data read successfully")
-    print("Sample data:")
-    print(input_texts[:5])
-    print(target_texts[:5])
+
+    print("TMX Data read successfully")
+    print("Sample German Sentences:", input_texts[:5])
+    print("Sample English Sentences:", target_texts[:5])
     return input_texts, target_texts
 
+# Main function
 
-def main(data_path: str) -> None:
-    # I'm sorry the code is kinda shit with all the globals
+def main():
     global INPUT_VOCAB_SIZE, OUTPUT_VOCAB_SIZE, MAX_INPUT_LENGTH, MAX_OUTPUT_LENGTH
     global encoder_input_train, decoder_input_train, decoder_target_train
     global encoder_input_val, decoder_input_val, decoder_target_val
     global reverse_word_index_output
     global input_tokenizer, output_tokenizer
 
-    # Load and preprocess data
-    input_texts, target_texts = load_data(data_path)
+    # Ask the user for the type of dataset using a dropdown
+    dataset_type = inquirer.select(
+        message="Select the dataset type:",
+        choices=["tmx", "europarl"],
+    ).execute()
 
-    # Add start and end tokens to target sentences for training (e.g., "<start>" and "<end>")
+    if dataset_type == 'tmx':
+        while True:
+            try:
+                data_path = input("Enter the path to the TMX dataset: ").strip()
+                input_texts, target_texts = load_tmx_data(data_path)
+                break
+            except FileNotFoundError:
+                print("File not found. Please check the file path.")
+
+    elif dataset_type == 'europarl':
+        while True:
+            try:
+                file_path_de = input("Enter the path to the German file (.de): ").strip()
+                file_path_en = input("Enter the path to the English file (.en): ").strip()
+                input_texts, target_texts = load_europarl_data(file_path_en, file_path_de)
+                break
+            except FileNotFoundError:
+                print("File not found. Please check the file path.")
+    else:
+        print("Invalid dataset type. Please enter 'tmx' or 'europarl'.")
+        return
+
+    # Add start and end tokens to target sentences for training
     target_texts = ['sos ' + text + ' eos' for text in target_texts]
 
-    # Tokenize the input (German) and output (English) sentences
+    # Tokenize the input (German) and output (English) sentences with progress bar
     print("Tokenizing Input")
     input_tokenizer = Tokenizer()
     input_tokenizer.fit_on_texts(input_texts)
@@ -84,6 +131,7 @@ def main(data_path: str) -> None:
     output_tokenizer.fit_on_texts(target_texts)
     output_sequences = output_tokenizer.texts_to_sequences(target_texts)
     OUTPUT_VOCAB_SIZE = len(output_tokenizer.word_index) + 1
+
     # Get max lengths for padding
     MAX_INPUT_LENGTH = max(len(seq) for seq in input_sequences)
     MAX_OUTPUT_LENGTH = max(len(seq) for seq in output_sequences)
@@ -102,11 +150,7 @@ def main(data_path: str) -> None:
     )
 
     reverse_word_index_output = dict([(value, key) for (key, value) in output_tokenizer.word_index.items()])
+    print("Data processing complete.")
 
-
-if __name__ == '__main__':
-    import tensorflow as tf
-
-    devices = tf.config.list_physical_devices()
-    print("\nDevices: ", devices)
-    print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
+if __name__ == "__main__":
+    main()
