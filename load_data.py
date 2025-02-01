@@ -1,10 +1,19 @@
+import random
+
 import numpy as np
+from tensorboard.compat import tf
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import regex as re
 from InquirerPy import inquirer
+import pickle as pk
+
+# Ensure reproducibility
+random.seed(42)
+np.random.seed(42)
+tf.random.set_seed(42)
 
 INPUT_VOCAB_SIZE: int
 OUTPUT_VOCAB_SIZE: int
@@ -79,9 +88,76 @@ def load_tmx_data(file_path: str) -> tuple[list[str], list[str]]:
     print("Sample English Sentences:", target_texts[:5])
     return input_texts, target_texts
 
+# Load Tab-delimited data
+def load_tab_data(file_path: str) -> tuple[list[str], list[str]]:
+    input_texts = []
+    target_texts = []
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    for line in lines:
+        line = line.strip().split('\t')
+        input_texts.append(line[0])
+        target_texts.append(line[1])
+
+    # filter out punctuation
+    input_texts = [re.sub(r'[^\w\s]', '', text) for text in input_texts]
+    target_texts = [re.sub(r'[^\w\s]', '', text) for text in target_texts]
+
+    print("tab-delimited data read successfully")
+    print("Sample German Sentences:", input_texts[:5])
+    print("Sample English Sentences:", target_texts[:5])
+
+    return input_texts, target_texts
+
 # Main function
 
-def main():
+class LoadData:
+    INPUT_VOCAB_SIZE: int
+    OUTPUT_VOCAB_SIZE: int
+    MAX_INPUT_LENGTH: int
+    MAX_OUTPUT_LENGTH: int
+    encoder_input_train: np.ndarray
+    decoder_input_train: np.ndarray
+    decoder_target_train: np.ndarray
+    encoder_input_val: np.ndarray
+    decoder_input_val: np.ndarray
+    decoder_target_val: np.ndarray
+    reverse_word_index_output: dict
+    input_tokenizer: Tokenizer
+    output_tokenizer: Tokenizer
+
+    def __init__(self, INPUT_VOCAB_SIZE, OUTPUT_VOCAB_SIZE, MAX_INPUT_LENGTH, MAX_OUTPUT_LENGTH, encoder_input_train, decoder_input_train, decoder_target_train, encoder_input_val, decoder_input_val, decoder_target_val, reverse_word_index_output, input_tokenizer, output_tokenizer):
+        self.INPUT_VOCAB_SIZE = INPUT_VOCAB_SIZE
+        self.OUTPUT_VOCAB_SIZE = OUTPUT_VOCAB_SIZE
+        self.MAX_INPUT_LENGTH = MAX_INPUT_LENGTH
+        self.MAX_OUTPUT_LENGTH = MAX_OUTPUT_LENGTH
+        self.encoder_input_train = encoder_input_train
+        self.decoder_input_train = decoder_input_train
+        self.decoder_target_train = decoder_target_train
+        self.encoder_input_val = encoder_input_val
+        self.decoder_input_val = decoder_input_val
+        self.decoder_target_val = decoder_target_val
+        self.reverse_word_index_output = reverse_word_index_output
+        self.input_tokenizer = input_tokenizer
+        self.output_tokenizer = output_tokenizer
+
+
+    def get(self, name: str):
+        try:
+            return getattr(self, name)
+        except AttributeError:
+            try:
+                name = name.upper()
+                return getattr(self, name)
+            except AttributeError as e:
+                raise AttributeError(e.add_note(
+                    f"Attribute {name} not found in LoadData"
+                ))
+
+
+def main(saveData: bool = True):
     global INPUT_VOCAB_SIZE, OUTPUT_VOCAB_SIZE, MAX_INPUT_LENGTH, MAX_OUTPUT_LENGTH
     global encoder_input_train, decoder_input_train, decoder_target_train
     global encoder_input_val, decoder_input_val, decoder_target_val
@@ -91,10 +167,10 @@ def main():
     # Ask the user for the type of dataset using a dropdown
     dataset_type = inquirer.select(
         message="Select the dataset type:",
-        choices=["tmx", "europarl"],
+        choices=["tmx from OPUS", "europarl", "tab-delimited"],
     ).execute()
 
-    if dataset_type == 'tmx':
+    if dataset_type == "tmx from OPUS":
         while True:
             try:
                 data_path = input("Enter the path to the TMX dataset: ").strip()
@@ -112,9 +188,30 @@ def main():
                 break
             except FileNotFoundError:
                 print("File not found. Please check the file path.")
+
+    elif dataset_type == 'tab-delimited':
+        while True:
+            try:
+                file_path = input("Enter the path to the tab-delimited dataset: ").strip()
+                input_texts, target_texts = load_tab_data(file_path)
+                break
+            except FileNotFoundError:
+                print("File not found. Please check the file path.")
+
     else:
-        print("Invalid dataset type. Please enter 'tmx' or 'europarl'.")
-        return
+        print("Invalid dataset type. Exiting...")
+        raise SystemExit
+
+    reverse = inquirer.select(
+        message="Are the sentences in reverse order? (German mistakenly labeled as English and vice versa)",
+        choices=["No", "Yes"]
+    ).execute()
+
+    if reverse == "Yes":
+        print("Reversing the order of sentences.")
+        input_texts, target_texts = target_texts, input_texts
+        print("Sample German Sentences:", input_texts[:5])
+        print("Sample English Sentences:", target_texts[:5])
 
     # Add start and end tokens to target sentences for training
     target_texts = ['sos ' + text + ' eos' for text in target_texts]
@@ -131,6 +228,7 @@ def main():
     output_tokenizer.fit_on_texts(target_texts)
     output_sequences = output_tokenizer.texts_to_sequences(target_texts)
     OUTPUT_VOCAB_SIZE = len(output_tokenizer.word_index) + 1
+
 
     # Get max lengths for padding
     MAX_INPUT_LENGTH = max(len(seq) for seq in input_sequences)
@@ -150,7 +248,11 @@ def main():
     )
 
     reverse_word_index_output = dict([(value, key) for (key, value) in output_tokenizer.word_index.items()])
-    print("Data processing complete.")
 
-if __name__ == "__main__":
-    main()
+
+    if saveData:
+        s = LoadData(INPUT_VOCAB_SIZE, OUTPUT_VOCAB_SIZE, MAX_INPUT_LENGTH, MAX_OUTPUT_LENGTH, encoder_input_train, decoder_input_train, decoder_target_train, encoder_input_val, decoder_input_val, decoder_target_val, reverse_word_index_output, input_tokenizer, output_tokenizer)
+        with open("data.pkl", "wb") as f:
+            pk.dump(s, f)
+
+    print("Data processing complete.")
